@@ -1,140 +1,56 @@
 -- Миграционный скрипт
 -- 2026-09-23
-drop table if exists measurment_values;
-drop table if exists measurment_baths;
-drop table if exists measurment_types;
-drop table if exists employees;
-drop table if exists military_ranks;
-drop table if exists parameter_types;
-drop table if exists units;
-drop table if exists base_units;
-
--- 1. Справочник должностей
-create table military_ranks
+create table if not exists base_units
 (
 	id integer,
+	short_name character varying(50),
 	description character varying(255)
 );
 
-comment on table military_ranks is 'Справочник должностей';
-comment on column military_ranks.id is 'Уникальный код';
-comment on column military_ranks.description is 'Описание';
-
--- Заполняем данные
-insert into military_ranks(id, description)
-values(1,'Рядовой'),(2,'Лейтенант');
-
--- 2. Пользователя
-create table employees
+create table if not exists units
 (
-    id integer,
-	name text,
-	birthday timestamp ,
-	military_rank_id integer
-);
-
-comment on table employees is 'Пользователи';
-comment on column employees.id is 'Уникальный код';
-comment on column employees.name is 'Наименование';
-comment on column employees.birthday is 'Дата рождения';
-comment on column employees.military_rank_id is 'Уникальный код должности';
-
--- Заполняем данные
-insert into employees(id, name, birthday,military_rank_id )  
-values(1, 'Воловиков Александр Сергеевич','1978-06-24', 2);
-
--- 3. Устройства для измерения
-create table measurment_types
-(
-   id integer,
-   short_name  character varying(50),
-   description text 
-);
-
-comment on table measurment_types is 'Измерительное оборудование';
-comment on column measurment_types.id is 'Уникальный код';
-comment on column measurment_types.short_name is 'Краткое наименование';
-comment on column measurment_types.description is 'Описание';
-
--- Заполняем данные
-insert into measurment_types(id, short_name, description)
-values(1, 'ДМК', 'Десантный метео комплекс'),
-(2,'ВР','Ветровое ружье');
-
----Базовые единицы измерения
-create table base_units
-(
-    id integer,
-    short_name character varying(50),
-    description character varying(255)
-);
-
-comment on table base_units is 'Справочник базовых единиц измерения';
-comment on column base_units.short_name is 'Краткое название';
-comment on column base_units.description is 'Описание';
-
-create table units
-(
-    id integer,
+	id integer,
+	id integer,
     base_unit_id integer,
     short_name character varying(50),
     full_name character varying(255),
     conversion_factor numeric(20,10) default 1
 );
 
+create table if not exists parametr_types
+(
+	id integer, 
+	short_name character varying(50),
+	description character varying(255),
+	base_unit_id integer,
+	defualt_unit_id integer
+	
+);
+
+comment on table base_units is 'Справочник базовых единиц измерения';
+comment on column base_units.id is 'Уникальный код';
+comment on column base_units.short_name is 'Краткое наименование';
+comment on column base_units.description is 'Описание';
+
 comment on table units is 'Справочник единиц измерения';
 comment on column units.id is 'Уникальный код';
 comment on column units.base_unit_id is 'Ссылка на базовую единицу измерения';
 comment on column units.short_name is 'Краткое обозначение';
 comment on column units.full_name is 'Полное наименование';
-comment on column units.conversion_factor is 'Коэффициент пересчёта к базовой единице';
-
-create table parameter_types
-(
-    id integer,
-    short_name character varying(50),
-    description character varying(255),
-    base_unit_id integer,
-    default_unit_id integer
-);
+comment on column units.conversion_factor is 'Коэффициент пересчёта';
 
 comment on table parameter_types is 'Справочник типов параметров измерений';
 comment on column parameter_types.id is 'Уникальный код';
 comment on column parameter_types.short_name is 'Краткое наименование';
 comment on column parameter_types.description is 'Описание параметра';
 comment on column parameter_types.base_unit_id is 'Ссылка на базовую единицу измерения';
-comment on column parameter_types.default_unit_id is 'Ссылка на единицу измерения по умолчанию';
+comment on column parameter_types.default_unit_id is 'Ссылка на единицу по умолчанию';
 
-create table measurment_baths
-(
-	id integer ,
-	emploee_id integer,
-	measurment_type_id integer,
-	started timestamp default now()
-);
+-- Очистка перед заполнением
+delete from base_units;
+delete from units;
+delete from parameter_types;
 
-comment on table measurment_baths is 'Пачки';
-comment on column measurment_baths.emploee_id is 'Уникальный код пользователя';
-comment on column measurment_baths.measurment_type_id is 'Уникальный код оборудования';
-comment on column measurment_baths.started is 'Дата измерения';
-
-create table measurment_values
-(
-    id integer,
-    measurment_bath_id integer,
-    parameter_type_id integer,
-    unit_id integer,
-    value numeric(8,2)
-);
-
-comment on table measurment_values is 'Значения параметров измерений';
-comment on column measurment_values.id is 'Уникальный код';
-comment on column measurment_values.measurment_bath_id is 'Ссылка на пачку измерений';
-comment on column measurment_values.parameter_type_id is 'Тип параметра';
-comment on column measurment_values.unit_id is 'Единица измерения';
-comment on column measurment_values.value is 'Значение параметра';
-
--- Заполняем данные
 insert into base_units(id, short_name, description)
 values
     (1, 'Длина',       'Длина/высота'),
@@ -143,7 +59,6 @@ values
     (4, 'Скорость',    'Скорость'),
     (5, 'Угол',        'Угол/направление');
 
---Единицы измерения
 insert into units(id, base_unit_id, short_name, full_name, conversion_factor)
 values
     (1, 1, 'м',         'метр',                      1),
@@ -154,7 +69,6 @@ values
     (6, 4, 'м/с',       'метр в секунду',            1),
     (7, 5, '°',         'градус',                    1);
 
--- Типы параметров
 insert into parameter_types(id, short_name, description, base_unit_id, default_unit_id)
 values
     (1, 'height',         'Высота',            1, 1),
@@ -163,7 +77,27 @@ values
     (4, 'wind_direction', 'Направление ветра', 5, 7),
     (5, 'wind_speed',     'Скорость ветра',    4, 6);
 
-insert into measurment_values(id, measurment_bath_id, parameter_type_id, unit_id, value)
+-- Обновляем measurment_input_params
+delete from measurment_input_params;
+
+alter table measurment_input_params drop column if exists height;
+alter table measurment_input_params drop column if exists temperature;
+alter table measurment_input_params drop column if exists pressure;
+alter table measurment_input_params drop column if exists wind_direction;
+alter table measurment_input_params drop column if exists wind_speed;
+
+alter table measurment_input_params add column if not exists parameter_type_id integer;
+alter table measurment_input_params add column if not exists unit_id integer;
+alter table measurment_input_params add column if not exists value numeric(8,2);
+
+comment on table measurment_input_params is 'Значения параметров измерений';
+comment on column measurment_input_params.id is 'Уникальный код';
+comment on column measurment_input_params.measurment_bath_id is 'Ссылка на пачку измерений';
+comment on column measurment_input_params.parameter_type_id is 'Тип параметра';
+comment on column measurment_input_params.unit_id is 'Единица измерения';
+comment on column measurment_input_params.value is 'Значение параметра';
+
+insert into measurment_input_params(id, measurment_bath_id, parameter_type_id, unit_id, value)
 values
     (11, 1, 1, 1, 100.00),   -- высота, м
     (12, 1, 2, 3, 12.00),    -- температура, °C
@@ -171,34 +105,29 @@ values
     (14, 1, 4, 7, 0.20),     -- направление ветра, °
     (15, 1, 5, 6, 45.00);    -- скорость ветра, м/с
 
-insert into measurment_baths(id, emploee_id, measurment_type_id, started)
-values(1, 1, 1, '2026-09-01'),(2,1,2, '2026-09-02');
-
----------------------------------------------------
--- Итоговый запрос
----------------------------------------------------
 
 select
     measurment_baths.started as "Дата измерения",
     measurment_baths.id as "Номер пачки",
     employees.name as "ФИО сотрудника",
-    parameter_types.description || ' ' || units.short_name as "Наименование ед. измерения",
-    measurment_values.value as "Значение"
-from measurment_baths, measurment_values, parameter_types, units, base_units,
-     measurment_types, employees, military_ranks
+    parameter_types.description || ' ' || units.short_name as "Параметр и ед. изм.",
+    measurment_input_params.value as "Значение"
+from measurment_baths, measurment_input_params, measurment_types,
+     employees, military_ranks,
+     parameter_types, units, base_units
 where
         -- Связь пачка - пользователи
         employees.id = measurment_baths.emploee_id
-        -- Связь звание - пользователь
+        -- Связь должность - пользователь
     and employees.military_rank_id = military_ranks.id
         -- Связь пачка - тип оборудования
     and measurment_types.id = measurment_baths.measurment_type_id
-        -- Связь пачка - значения параметров
-    and measurment_values.measurment_bath_id = measurment_baths.id
-        -- Связь значение - тип параметра
-    and parameter_types.id = measurment_values.parameter_type_id
-        -- Связь значение - единица измерения
-    and units.id = measurment_values.unit_id
+        -- Связь пачка - параметры
+    and measurment_input_params.measurment_bath_id = measurment_baths.id
+        -- Связь параметр - тип параметра
+    and parameter_types.id = measurment_input_params.parameter_type_id
+        -- Связь параметр - единица измерения
+    and units.id = measurment_input_params.unit_id
         -- Связь единица измерения - базовая величина
     and base_units.id = units.base_unit_id
 order by measurment_baths.id, parameter_types.id;
