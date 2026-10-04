@@ -1,0 +1,207 @@
+-- Одинаковое ли количество измерений у каждого пользователя?
+with employee_batch_counts as (
+    select employee.id              as employee_id,
+           employee.name            as employee_name,
+           count(batch.id)          as batch_count
+    from employees as employee
+    left join measurment_baths as batch
+           on batch.employee_id = employee.id
+    group by employee.id, employee.name
+)
+select employee_id,
+       employee_name,
+       batch_count,
+       (select count(distinct batch_count)
+          from employee_batch_counts) as distinct_batch_counts,
+       case
+           when (select count(distinct batch_count)
+                   from employee_batch_counts) = 1
+                then 'OK'
+           else 'FAIL: разное количество измерений у пользователей'
+       end                            as verdict
+from employee_batch_counts
+order by batch_count, employee_id;
+
+
+-- Есть ли пустые пачки измерений?
+select batch.id                       as batch_id,
+       batch.employee_id              as employee_id,
+       batch.started                  as started,
+       'FAIL: пачка без параметров'   as verdict
+from measurment_baths as batch
+left join measurment_input_params as input_param
+       on input_param.measurment_bath_id = batch.id
+where input_param.id is null
+order by batch.id;
+
+
+-- Содержит ли каждая пачка ровно 5 параметров?
+select batch.id                                    as batch_id,
+       count(input_param.id)                       as total_params,
+       count(distinct input_param.param_type_id)   as distinct_params,
+       array_agg(distinct input_param.param_type_id
+                 order by input_param.param_type_id) as present_types,
+       case
+           when count(distinct input_param.param_type_id) < 5
+                then 'FAIL: не хватает параметров'
+           when count(input_param.id) > 5
+                then 'FAIL: дубликаты параметров'
+           else 'OK'
+       end                                         as verdict
+from measurment_baths as batch
+left join measurment_input_params as input_param
+       on input_param.measurment_bath_id = batch.id
+group by batch.id
+having count(distinct input_param.param_type_id) <> 5
+    or count(input_param.id) <> 5
+order by batch.id;
+
+
+select input_param.id                  as input_param_id,
+       input_param.measurment_bath_id  as batch_id,
+       input_param.param_type_id       as param_type_id,
+       param_type.name                 as param_name,
+       input_param.value               as value,
+       case
+           when input_param.param_type_id = 1
+                and (input_param.value < 0    or input_param.value > 5000)
+                then 'Высота вне 0..5000'
+           when input_param.param_type_id = 2
+                and (input_param.value < -60  or input_param.value > 60)
+                then 'Температура вне -60..60'
+           when input_param.param_type_id = 3
+                and (input_param.value < 600  or input_param.value > 800)
+                then 'Давление вне 600..800'
+           when input_param.param_type_id = 4
+                and (input_param.value < 0    or input_param.value > 360)
+                then 'Направление вне 0..360'
+           when input_param.param_type_id = 5
+                and (input_param.value < 0    or input_param.value > 50)
+                then 'Скорость вне 0..50'
+       end                             as issue
+from measurment_input_params as input_param
+join params_type as param_type
+       on param_type.id = input_param.param_type_id
+where (input_param.param_type_id = 1
+       and (input_param.value < 0    or input_param.value > 5000))
+   or (input_param.param_type_id = 2
+       and (input_param.value < -60  or input_param.value > 60))
+   or (input_param.param_type_id = 3
+       and (input_param.value < 600  or input_param.value > 800))
+   or (input_param.param_type_id = 4
+       and (input_param.value < 0    or input_param.value > 360))
+   or (input_param.param_type_id = 5
+       and (input_param.value < 0    or input_param.value > 50))
+order by input_param.measurment_bath_id, input_param.param_type_id;
+
+
+-- Корректны ли единицы измерения у параметров?
+select param_type.id            as param_type_id,
+       param_type.name          as param_name,
+       unit.id                  as unit_id,
+       unit.name                as unit_name,
+       base_unit.id             as base_unit_id,
+       base_unit.name           as base_unit_name,
+       case
+           when param_type.id = 1 and base_unit.id <> 1
+                then 'FAIL: для «Высоты» нужна единица группы «м»'
+           when param_type.id = 2 and base_unit.id <> 2
+                then 'FAIL: для «Температуры» нужна единица группы «°C»'
+           when param_type.id = 3 and base_unit.id <> 3
+                then 'FAIL: для «Давления» нужна единица группы «мм рт. ст.»'
+           when param_type.id = 4 and base_unit.id <> 4
+                then 'FAIL: для «Направления» нужна единица группы «°»'
+           when param_type.id = 5 and base_unit.id <> 5
+                then 'FAIL: для «Скорости» нужна единица группы «м/с»'
+           else 'OK'
+       end                      as verdict
+from params_type as param_type
+join units      as unit
+       on unit.id      = param_type.unit_id
+join base_units as base_unit
+       on base_unit.id = unit.base_unit_id
+order by param_type.id;
+
+
+with criteria as (
+
+    -- 1. Одинаковое количество измерений у пользователей
+    select '1. Одинаковое количество измерений у пользователей' as criterion,
+           case when (select count(distinct batch_count)
+                        from (
+                            select count(batch.id) as batch_count
+                            from employees as employee
+                            left join measurment_baths as batch
+                                   on batch.employee_id = employee.id
+                            group by employee.id
+                        ) as counts) = 1
+                then 'PASS' else 'FAIL'
+           end as result
+
+    union all
+
+    -- 2. Отсутствие пустых пачек
+    select '2. Отсутствие пустых пачек измерений',
+           case when exists (
+                    select 1
+                    from measurment_baths as batch
+                    left join measurment_input_params as input_param
+                           on input_param.measurment_bath_id = batch.id
+                    where input_param.id is null)
+                then 'FAIL' else 'PASS'
+           end
+
+    union all
+
+    -- 3. Полный набор из 5 параметров в каждой пачке
+    select '3. Полный набор из 5 параметров в каждой пачке',
+           case when exists (
+                    select 1
+                    from measurment_baths as batch
+                    left join measurment_input_params as input_param
+                           on input_param.measurment_bath_id = batch.id
+                    group by batch.id
+                    having count(distinct input_param.param_type_id) <> 5)
+                then 'FAIL' else 'PASS'
+           end
+
+    union all
+
+    -- 4. Значения в допустимых диапазонах
+    select '4. Значения параметров в допустимых диапазонах',
+           case when exists (
+                    select 1
+                    from measurment_input_params as input_param
+                    where (input_param.param_type_id = 1
+                           and (input_param.value < 0    or input_param.value > 5000))
+                       or (input_param.param_type_id = 2
+                           and (input_param.value < -60  or input_param.value > 60))
+                       or (input_param.param_type_id = 3
+                           and (input_param.value < 600  or input_param.value > 800))
+                       or (input_param.param_type_id = 4
+                           and (input_param.value < 0    or input_param.value > 360))
+                       or (input_param.param_type_id = 5
+                           and (input_param.value < 0    or input_param.value > 50)))
+                then 'FAIL' else 'PASS'
+           end
+
+    union all
+
+    -- 5. Корректные единицы измерения
+    select '5. Соответствие единиц измерения типам параметров',
+           case when exists (
+                    select 1
+                    from params_type as param_type
+                    join units      as unit
+                           on unit.id = param_type.unit_id
+                    where (param_type.id = 1 and unit.base_unit_id <> 1)
+                       or (param_type.id = 2 and unit.base_unit_id <> 2)
+                       or (param_type.id = 3 and unit.base_unit_id <> 3)
+                       or (param_type.id = 4 and unit.base_unit_id <> 4)
+                       or (param_type.id = 5 and unit.base_unit_id <> 5))
+                then 'FAIL' else 'PASS'
+           end
+)
+select criterion, result
+from criteria
+order by criterion;
