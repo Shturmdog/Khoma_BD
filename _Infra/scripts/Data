@@ -1,0 +1,111 @@
+CREATE UNIQUE INDEX IF NOT EXISTS base_units_id_uidx ON base_units(id);
+CREATE UNIQUE INDEX IF NOT EXISTS units_id_uidx ON units(id);
+CREATE UNIQUE INDEX IF NOT EXISTS params_type_id_uidx ON params_type(id);
+CREATE UNIQUE INDEX IF NOT EXISTS employees_id_uidx ON employees(id);
+CREATE UNIQUE INDEX IF NOT EXISTS measurment_baths_id_uidx ON measurment_baths(id);
+CREATE UNIQUE INDEX IF NOT EXISTS measurment_input_params_id_uidx ON measurment_input_params(id);
+
+-- Базовые единицы
+INSERT INTO base_units (id, name) VALUES
+  (1, 'Метр'),
+  (2, 'Градус Цельсия'),
+  (3, 'Миллиметр ртутного столба'),
+  (4, 'Градус'),
+  (5, 'Метр в секунду')
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name;
+
+-- Единицы измерения
+INSERT INTO units (id, base_unit_id, name) VALUES
+  (1, 1, 'м'),
+  (2, 2, '°C'),
+  (3, 3, 'мм рт.ст.'),
+  (4, 4, '°'),
+  (5, 5, 'м/с')
+ON CONFLICT (id) DO UPDATE SET
+  base_unit_id = EXCLUDED.base_unit_id,
+  name = EXCLUDED.name;
+
+-- Типы параметров.
+-- У params_type id=4 намеренно НЕВЕРНАЯ единица: unit_id=5 (м/с) вместо 4 (°).
+INSERT INTO params_type (id, unit_id, name) VALUES
+  (1, 1, 'Высота'),
+  (2, 2, 'Температура'),
+  (3, 3, 'Давление'),
+  (4, 5, 'Направление'),  -- аномалия: неверная единица измерения
+  (5, 5, 'Скорость')
+ON CONFLICT (id) DO UPDATE SET
+  unit_id = EXCLUDED.unit_id,
+  name = EXCLUDED.name;
+
+-- 3 сотрудника с разными воинскими званиями
+INSERT INTO employees (id, name, birthday, military_rank_id) VALUES
+  (1, 'Иванов Иван Иванович', DATE '1985-03-12', 1),
+  (2, 'Петров Пётр Петрович', DATE '1990-07-25', 2),
+  (3, 'Сидоров Сидор Сидорович', DATE '1988-11-03', 3)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  birthday = EXCLUDED.birthday,
+  military_rank_id = EXCLUDED.military_rank_id;
+
+-- 6 пачек измерений: 2026-09-01 .. 2026-09-06
+-- id=2 — ПУСТАЯ пачка (без параметров)
+-- id=4 — только 4 параметра вместо 5
+INSERT INTO measurment_baths (id, employee_id, measurment_type_id, started) VALUES
+  (1, 1, 1, TIMESTAMP '2026-09-01 08:00:00'),
+  (2, 1, 1, TIMESTAMP '2026-09-02 08:00:00'),  -- пустая пачка
+  (3, 2, 1, TIMESTAMP '2026-09-03 08:00:00'),
+  (4, 2, 1, TIMESTAMP '2026-09-04 08:00:00'),  -- 4 параметра
+  (5, 3, 1, TIMESTAMP '2026-09-05 08:00:00'),
+  (6, 3, 1, TIMESTAMP '2026-09-06 08:00:00')
+ON CONFLICT (id) DO UPDATE SET
+  employee_id = EXCLUDED.employee_id,
+  measurment_type_id = EXCLUDED.measurment_type_id,
+  started = EXCLUDED.started;
+
+-- Параметры измерений
+-- Аномалии:
+--   id=7  — температура 75 °C, вне диапазона -60..60
+--   id=17 — давление 850 мм рт.ст., вне диапазона 600..800
+--   пачка id=2 — без параметров
+--   пачка id=4 — только 4 параметра (нет param_type_id=5)
+INSERT INTO measurment_input_params (id, measurment_bath_id, param_type_id, value) VALUES
+  -- Пачка 1: полный набор, 5 параметров
+  (1,  1, 1, 120.0),
+  (2,  1, 2, 25.0),
+  (3,  1, 3, 745.0),
+  (4,  1, 4, 180.0),
+  (5,  1, 5, 3.5),
+
+  -- Пачка 2: пустая, параметров нет
+
+  -- Пачка 3: полный набор, 5 параметров, температура вне диапазона
+  (6,  3, 1, 110.0),
+  (7,  3, 2, 75.0),    -- аномалия: температура вне -60..60
+  (8,  3, 3, 750.0),
+  (9,  3, 4, 90.0),
+  (10, 3, 5, 4.2),
+
+  -- Пачка 4: только 4 параметра, нет скорости (param_type_id=5)
+  (11, 4, 1, 115.0),
+  (12, 4, 2, 22.0),
+  (13, 4, 3, 760.0),
+  (14, 4, 4, 270.0),
+
+  -- Пачка 5: полный набор, 5 параметров, давление вне диапазона
+  (15, 5, 1, 130.0),
+  (16, 5, 2, 18.0),
+  (17, 5, 3, 850.0),   -- аномалия: давление вне 600..800
+  (18, 5, 4, 45.0),
+  (19, 5, 5, 6.1),
+
+  -- Пачка 6: полный набор, 5 параметров
+  (20, 6, 1, 125.0),
+  (21, 6, 2, 20.0),
+  (22, 6, 3, 770.0),
+  (23, 6, 4, 135.0),
+  (24, 6, 5, 5.0)
+ON CONFLICT (id) DO UPDATE SET
+  measurment_bath_id = EXCLUDED.measurment_bath_id,
+  param_type_id = EXCLUDED.param_type_id,
+  value = EXCLUDED.value;
