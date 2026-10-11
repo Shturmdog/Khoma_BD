@@ -1,0 +1,37 @@
+select
+    row_number() over (order by tbl."Тип", tbl."Название") as "№",
+    tbl."Название",
+    tbl."Тип"
+from
+(
+    -- Таблицы
+    select
+        table_name as "Название",
+        'Таблица'  as "Тип"
+    from information_schema.tables
+    where table_schema = 'public'
+        and table_type   = 'BASE TABLE'
+
+    union all
+
+    select
+        sequence_name as "Название",
+        'Счётчик'     as "Тип"
+    from information_schema.sequences
+    where sequence_schema = 'public'
+
+    union all
+
+    select
+        constraint_name as "Название",
+        case constraint_type
+            when 'PRIMARY KEY' then 'Первичный ключ'
+            when 'FOREIGN KEY' then 'Внешний ключ'
+            when 'CHECK'       then 'Проверка'
+            when 'UNIQUE'      then 'Уникальность'
+        end as "Тип"
+    from information_schema.table_constraints
+    where table_schema = 'public'
+        and constraint_name not like '%not_null'
+) as tbl
+order by tbl."Тип", tbl."Название";
