@@ -31,7 +31,7 @@ from
             when 'UNIQUE'      then 'Уникальность'
         end as "Тип"
     from information_schema.table_constraints
-    where table_schema = 'public'
+    where table_schema = 'public' and table_catalog = 'Test'
         and constraint_name not like '%not_null'
 ) as tbl
 order by tbl."Тип", tbl."Название";
