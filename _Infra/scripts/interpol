@@ -1,0 +1,66 @@
+do $$
+begin
+    drop type if exists interpolation_type cascade;
+
+    create type interpolation_type as
+    (
+        x0 numeric,
+        y0 numeric,
+        x1 numeric,
+        y1 numeric
+    );
+
+    comment on type interpolation_type is 'Точки интерполяции';
+
+
+    create or replace function get_interpolation(p_t numeric)
+        returns interpolation_type
+        language plpgsql
+    as $BODY$
+    declare
+        v_pts interpolation_type;
+    begin
+        select temperature, correction
+          into v_pts.x0, v_pts.y0
+          from measurment_values 
+         where temperature <= p_t
+         order by temperature desc
+         limit 1;
+
+        select temperature, correction
+          into v_pts.x1, v_pts.y1
+          from measurment_values 
+         where temperature >= p_t
+         order by temperature asc
+         limit 1;
+
+        v_pts.x0 := coalesce(v_pts.x0, v_pts.x1);
+        v_pts.y0 := coalesce(v_pts.y0, v_pts.y1);
+        v_pts.x1 := coalesce(v_pts.x1, v_pts.x0);
+        v_pts.y1 := coalesce(v_pts.y1, v_pts.y0);
+
+        return v_pts;
+    end;
+    $BODY$;
+
+    comment on function get_interpolation(numeric)
+        is 'Возвращает опорные точки';
+
+
+    create or replace function calc_interpolated(p_x numeric, p_pts interpolation_type)
+        returns numeric
+        language plpgsql
+    as $BODY$
+    begin
+        return case
+            when p_pts.x1 = p_pts.x0 then p_pts.y0
+            else p_pts.y0
+               + (p_x - p_pts.x0) * (p_pts.y1 - p_pts.y0)
+               / (p_pts.x1 - p_pts.x0)
+        end;
+    end;
+    $BODY$;
+
+    comment on function calc_interpolated(numeric, interpolation_type)
+        is 'Интерполяция';
+end $$;
