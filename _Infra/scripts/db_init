@@ -1,0 +1,317 @@
+do $$
+begin
+
+	-- Очистка
+	drop table if exists measurment_input_params cascade;
+	drop table if exists measurment_baths        cascade;
+	drop table if exists measurment_values       cascade;
+	drop table if exists params_type             cascade;
+	drop table if exists parameter_types         cascade;
+	drop table if exists measurment_types        cascade;
+	drop table if exists employees               cascade;
+	drop table if exists units                   cascade;
+	drop table if exists base_units              cascade;
+	drop table if exists military_ranks          cascade;
+	
+	-- Счётчики
+	create sequence seq_military_ranks          start with 1;
+	create sequence seq_base_units              start with 1;
+	create sequence seq_units                   start with 1;
+	create sequence seq_employees               start with 1;
+	create sequence seq_measurment_types        start with 1;
+	create sequence seq_parameter_types         start with 1;
+	create sequence seq_params_type             start with 1;
+	create sequence seq_measurment_values       start with 1;
+	create sequence seq_measurment_baths        start with 1;
+	create sequence seq_measurment_input_params start with 1;
+	
+	create table military_ranks
+	(
+	    id   integer default nextval('seq_military_ranks') not null,
+	    name character varying(100) not null
+	);
+	alter sequence seq_military_ranks owned by military_ranks.id;
+	comment on table military_ranks is 'Справочник воинских званий';
+	
+	
+	create table base_units
+	(
+	    id   integer default nextval('seq_base_units') not null,
+	    name text not null
+	);
+	alter sequence seq_base_units owned by base_units.id;
+	comment on table base_units is 'Базовые единицы измерения';
+	
+	
+	create table units
+	(
+	    id             integer default nextval('seq_units') not null,
+	    name           text not null,
+	    base_unit_id   integer,
+	    convert_factor numeric(12,6)
+	);
+	alter sequence seq_units owned by units.id;
+	comment on table units is 'Единицы измерения';
+	
+	
+	create table employees
+	(
+	    id              integer default nextval('seq_employees') not null,
+	    name            text not null,
+	    military_rank_id integer
+	);
+	alter sequence seq_employees owned by employees.id;
+	comment on table employees is 'Пользователи';
+	
+	
+	create table measurment_types
+	(
+	    id          integer default nextval('seq_measurment_types') not null,
+	    short_name  character varying(50) not null,
+	    description text
+	);
+	alter sequence seq_measurment_types owned by measurment_types.id;
+	comment on table measurment_types is 'Виды измерений / оборудование';
+	
+	
+	create table parameter_types
+	(
+	    id      integer default nextval('seq_parameter_types') not null,
+	    name    text not null,
+	    unit_id integer
+	);
+	alter sequence seq_parameter_types owned by parameter_types.id;
+	comment on table parameter_types is 'Справочник типов параметров';
+	
+	create table params_type
+	(
+	    id                 integer default nextval('seq_params_type') not null,
+	    parameter_type_id  integer,
+	    measurment_type_id integer
+	);
+	alter sequence seq_params_type owned by params_type.id;
+	comment on table params_type is 'Какие параметры измеряются каким видом измерений';
+	
+	create table measurment_values
+	(
+	    id          integer default nextval('seq_measurment_values') not null,
+	    temperature numeric(4,1) not null,   -- опорная температура t0
+	    correction  numeric(3,1) not null    -- виртуальная поправка dTv
+	);
+	alter sequence seq_measurment_values owned by measurment_values.id;
+	comment on table measurment_values is 'Таблица 1: виртуальная поправка температуры';
+	
+	create table measurment_baths
+	(
+	    id                 integer default nextval('seq_measurment_baths') not null,
+	    employee_id        integer,
+	    measurment_type_id integer,
+	    started            timestamp default now()
+	);
+	alter sequence seq_measurment_baths owned by measurment_baths.id;
+	comment on table measurment_baths is 'Пачки измерений';
+	
+	
+	create table measurment_input_params
+	(
+	    id                    integer default nextval('seq_measurment_input_params') not null,
+	    measurment_bath_id    integer,
+	    parameter_type_id     integer,
+	    measurment_value      numeric(10,2) default 0
+	);
+	alter sequence seq_measurment_input_params owned by measurment_input_params.id;
+	comment on table measurment_input_params is 'Входные параметры измерений';
+	
+	-- Тестовые данные
+	
+	insert into base_units(id, name) values
+	    (1, 'Метр'),
+	    (2, 'Градус Цельсия'),
+	    (3, 'Паскаль'),
+	    (4, 'Градус'),
+	    (5, 'Метр в секунду'),
+	    (6, 'Процент');
+	
+	insert into military_ranks(id, name) values
+	    (1, 'Рядовой'),
+	    (2, 'Ефрейтор'),
+	    (3, 'Сержант'),
+	    (4, 'Старший лейтенант');
+	
+	insert into units(id, name, base_unit_id, convert_factor) values
+	    (1, 'Километр',                   1, 1000),
+	    (2, 'Метр',                       1, 1),
+	    (3, 'Градус Цельсия',             2, 1),
+	    (4, 'Миллиметры ртутного столба', 3, 133.322),
+	    (5, 'Паскаль',                    3, 1),
+	    (6, 'Большое деление угломера',   4, 6),
+	    (7, 'Градус',                     4, 1),
+	    (8, 'Метр в секунду',             5, 1),
+	    (9, 'Процент',                    6, 1);
+	
+	insert into measurment_types(id, short_name, description) values
+	    (1, 'ДМК', 'Десантный метео комплект'),
+	    (2, 'ВР',  'Ветровое ружье');
+	
+	
+	insert into parameter_types(id, name, unit_id) values
+	    (1, 'Высота метеопоста',    2),
+	    (2, 'Температура',          3),
+	    (3, 'Давление',             4),
+	    (4, 'Направление ветра',    6),
+	    (5, 'Скорость ветра',       8),
+	    (6, 'Дальность сноса пуль', 2),
+	    (7, 'Влажность воздуха',    9);
+	
+	
+	insert into params_type(id, parameter_type_id, measurment_type_id) values
+	    (1, 1, 1),
+	    (2, 2, 1),
+	    (3, 3, 1),
+	    (4, 4, 1),
+	    (5, 5, 1),
+	    (6, 7, 1),
+	    (7, 4, 2),
+	    (8, 5, 2),
+	    (9, 6, 2);
+	
+	
+	perform setval('seq_base_units',          (select max(id) from base_units));
+	perform setval('seq_military_ranks',      (select max(id) from military_ranks));
+	perform setval('seq_units',               (select max(id) from units));
+	perform setval('seq_measurment_types',    (select max(id) from measurment_types));
+	perform setval('seq_parameter_types',     (select max(id) from parameter_types));
+	perform setval('seq_params_type',         (select max(id) from params_type));
+	
+	
+	insert into employees(name, military_rank_id) values
+	    ('Волков Сергей Дмитриевич',   4),
+	    ('Орлов Максим Андреевич',     1),
+	    ('Захаров Павел Игоревич',     3);
+	
+	
+	insert into measurment_baths(employee_id, measurment_type_id, started) values
+	    (2, 1, '2026-10-01 07:00'), (2, 1, '2026-10-02 07:20'),
+	    (2, 1, '2026-10-03 07:40'), (2, 1, '2026-10-04 08:00'),
+	    (2, 1, '2026-10-05 08:20'), (2, 1, '2026-10-06 08:40'),
+	    (2, 1, '2026-10-07 09:00'), (2, 1, '2026-10-08 09:20');
+	
+	
+	insert into measurment_baths(employee_id, measurment_type_id, started) values
+	    (3, 2, '2026-10-09 12:10'), (3, 2, '2026-10-10 12:30'),
+	    (3, 2, '2026-10-11 12:50'), (3, 2, '2026-10-12 13:10'),
+	    (3, 2, '2026-10-13 13:30'), (3, 2, '2026-10-14 13:50'),
+	    (3, 2, '2026-10-15 14:10'), (3, 2, '2026-10-16 14:30');
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 1, 100 + id * 5 from measurment_baths where id between 1 and 8;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 2, 5 + id * 1.5 from measurment_baths where id between 1 and 8;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 3, 750 + id * 3 from measurment_baths where id between 1 and 8;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 4, (id * 13) % 60 from measurment_baths where id between 1 and 8;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 5, 2 + (id % 7) from measurment_baths where id between 1 and 8;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 7, 40 + id from measurment_baths where id between 1 and 8;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 4, (id * 9) % 60 from measurment_baths where id between 9 and 16;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 5, 3 + (id % 8) from measurment_baths where id between 9 and 16;
+	
+	
+	insert into measurment_input_params(measurment_bath_id, parameter_type_id, measurment_value)
+	select id, 6, 5 * (id - 8) from measurment_baths where id between 9 and 16;
+	
+	
+	insert into measurment_values(id, temperature, correction) values
+	    (1, -58,  0),
+	    (2, -40,  0),
+	    (3, 0,    0),
+	    (4, 5,    0.5),
+	    (5, 10,   1),
+	    (6, 15,   1),
+	    (7, 20,   1.5),
+	    (8, 25,   2),
+	    (9, 30,   3.5),
+	    (10, 40,  4.5),
+	    (11, 45,  5);
+	
+	perform setval('seq_measurment_values', (select max(id) from measurment_values));
+	
+	-- Первичные ключи
+	alter table military_ranks          add constraint pk_military_ranks          primary key (id);
+	alter table measurment_input_params add constraint pk_measurment_input_params primary key (id);
+	alter table parameter_types         add constraint pk_parameter_types         primary key (id);
+	alter table measurment_types        add constraint pk_measurment_types        primary key (id);
+	alter table measurment_values       add constraint pk_measurment_values       primary key (id);
+	alter table params_type             add constraint pk_params_type             primary key (id);
+	alter table employees               add constraint pk_employees               primary key (id);
+	alter table units                   add constraint pk_units                   primary key (id);
+	alter table base_units              add constraint pk_base_units              primary key (id);
+	alter table measurment_baths        add constraint pk_measurment_baths        primary key (id);
+	
+	-- Внешние ключи
+	alter table employees add constraint fk_employees_rank
+	    foreign key (military_rank_id) references military_ranks(id);
+	
+	alter table measurment_baths add constraint fk_baths_employee
+	    foreign key (employee_id) references employees(id);
+	alter table measurment_baths add constraint fk_baths_type
+	    foreign key (measurment_type_id) references measurment_types(id);
+	
+	alter table params_type add constraint fk_pt_parameter
+	    foreign key (parameter_type_id) references parameter_types(id);
+	alter table params_type add constraint fk_pt_mtype
+	    foreign key (measurment_type_id) references measurment_types(id);
+	
+	alter table units add constraint fk_units_base_unit
+	    foreign key (base_unit_id) references base_units(id);
+	
+	alter table parameter_types add constraint fk_ptypes_unit
+	    foreign key (unit_id) references units(id);
+	
+	alter table measurment_input_params add constraint fk_params_bath
+	    foreign key (measurment_bath_id) references measurment_baths(id);
+	alter table measurment_input_params add constraint fk_params_ptype
+	    foreign key (parameter_type_id) references parameter_types(id);
+	
+	alter table measurment_types  add constraint uq_mtypes_short_name unique (short_name);
+	alter table measurment_values add constraint uq_values_temperature unique (temperature);
+	alter table military_ranks    add constraint uq_ranks_name unique (name);
+	
+	
+	alter table measurment_input_params add constraint chk_measurment_value_range check (
+	    case parameter_type_id
+	        when 1 then true
+	        when 2 then measurment_value between -58 and 58
+	        when 3 then measurment_value between 500 and 900
+	        when 4 then measurment_value between 0 and 59
+	        when 5 then measurment_value between 0 and 15
+	        when 6 then measurment_value between 0 and 150
+	        when 7 then measurment_value between 0 and 100
+	        else false
+	    end
+	);
+	
+	alter table measurment_values add constraint chk_values_temp_range
+	    check (temperature between -58 and 58);
+	alter table measurment_values add constraint chk_values_correction
+	    check (correction >= 0);
+end $$;
