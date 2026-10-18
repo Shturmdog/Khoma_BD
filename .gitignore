@@ -1,0 +1,9 @@
+.env
+_Infra/pgadmin/pgadmin4.db
+_Infra/pgadmin/pgadmin4.db-*
+_Infra/pgadmin/sessions/
+_Infra/pgadmin/storage/
+_Infra/pgadmin/*.log
+pgadmin/pgadmin4.db
+pgadmin/sessions/
+pgadmin/storage/
