@@ -1,0 +1,47 @@
+do $$
+begin
+    drop table if exists check_results;
+
+    create temp table check_results
+    (
+        t        numeric,
+        expected numeric,
+        actual   numeric,  
+        status   text      
+    );
+
+    insert into check_results (t, expected, actual, status)
+    select 
+        t, 
+        expected,
+        calc_interpolated(t, get_interpolation(t)) as actual,
+        case 
+            when abs(calc_interpolated(t, get_interpolation(t)) - expected) < 0.000001 
+            then 'ОК' 
+            else 'НЕ ОК' 
+        end as status
+    from (
+        values
+            (-100.0, 0.0 ),
+            ( -20.0, 0.0 ),
+            (   0.0, 0.0 ),
+            (   8.0, 0.8 ),
+            (  12.0, 1.0 ),
+            (  22.5, 1.75),
+            (  25.0, 2.0 ),
+            (  28.0, 2.9 ),
+            (  45.0, 5.0 ),
+            (  60.0, 5.0 )
+    ) as test_cases(t, expected);
+
+end $$;
+
+
+
+select 
+    t as "температура",
+    expected as "предполагалось",
+    round(actual, 2) as "получено",
+    status
+from check_results
+order by t;
