@@ -1,0 +1,137 @@
+do $$
+begin
+-- таблица констант
+    drop table if exists meteo_constants cascade;
+    create table meteo_constants (
+        parameter_type_id integer primary key,
+        min_value         numeric not null,
+        max_value         numeric not null,
+        description       text
+    );
+
+    insert into meteo_constants values
+        (1, -9999, 9999, 'высота метеопоста'),
+        (2, -58,   58,   'температура'),
+        (3, 500,   900,  'давление'),
+        (4, 0,     59,   'направление ветра'),
+        (5, 0,     15,   'скорость ветра'),
+        (6, 0,     150,  'дальность сноса пуль'),
+        (7, 0,     100,  'влажность воздуха');
+
+ -- таблица математических констант
+    drop table if exists meteo_calc_constants cascade;
+    create sequence meteo_calc_constants_seq start with 1;
+    
+    create table meteo_calc_constants (
+        id              integer default nextval('meteo_calc_constants_seq') not null,
+        name            character varying(50) unique not null,
+        constant_value  numeric not null,
+        description     character varying(255) not null
+    );
+    alter sequence meteo_calc_constants_seq owned by meteo_calc_constants.id;
+    alter table meteo_calc_constants add constraint pk_meteo_calc_constants primary key (id);
+
+    insert into meteo_calc_constants (name, constant_value, description) values
+        ('base_pressure', 750, 'базовое атмосферное давление'),
+        ('base_virtual_temperature', 15.9, 'базовая виртуальная температура'),
+        ('negative_pressure_code', 500, 'код для отрицательного давления'),
+        ('negative_temperature_code', 50, 'код для отрицательной температуры');
+
+    perform setval('meteo_calc_constants_seq', (select max(id) from meteo_calc_constants));
+
+-- расширение ddl
+    alter table measurment_input_params add column if not exists error_message text;
+
+    drop type if exists param_record cascade;
+    create type param_record as (
+        parameter_type_id integer,
+        measurment_value  numeric
+    );
+
+    drop type if exists param_list cascade;
+    create type param_list as (
+        bath_id integer,
+        params  param_record[]
+    );
+
+ -- функция валидации
+    create or replace function fn_validate_params(p_list param_list)
+    returns text language plpgsql as $body$
+    declare
+        v_errors text := '';
+        v_item   param_record;
+        v_min    numeric;
+        v_max    numeric;
+    begin
+        foreach v_item in array p_list.params
+        loop
+            select min_value, max_value into v_min, v_max
+              from meteo_constants
+             where parameter_type_id = v_item.parameter_type_id;
+
+            if v_item.measurment_value < v_min or v_item.measurment_value > v_max then
+                v_errors := v_errors || format('параметр %s: значение %s вне [%s; %s]. ', 
+                                               v_item.parameter_type_id, v_item.measurment_value, v_min, v_max);
+            end if;
+        end loop;
+
+        return case when v_errors = '' then 'ошибок нет' else v_errors end;
+    end; $body$;
+
+
+ -- вспомогательная функция для чтения констант
+    create or replace function get_meteo_constant(p_name varchar)
+    returns numeric language plpgsql as $body$
+    declare
+        v_val numeric;
+    begin
+        select constant_value into v_val from meteo_calc_constants where name = p_name;
+        if v_val is null then
+            raise exception 'константа "%" не найдена', p_name;
+        end if;
+        return v_val;
+    end; $body$;
+
+-- функции расчета метео (ддччм, вввв, бббтт)
+    -- ддччм
+    create or replace function fn_meteo_ddchchm(p_time timestamp) returns text language sql as $body$
+        select to_char(p_time, 'ddhh24') || floor(extract(minute from p_time) / 10)::text;
+    $body$;
+
+    -- вввв
+    create or replace function fn_meteo_vvvv(p_height numeric) returns text language sql as $body$
+        select lpad(round(p_height)::text, 4, '0');
+    $body$;
+
+    -- бббтт
+    create or replace function fn_meteo_bbbt(p_pressure numeric, p_temp numeric)
+    returns text language plpgsql as $body$
+    declare
+        v_bbb text;
+        v_tt text;
+        v_delta_p numeric;
+        v_virtual_correction numeric;
+        v_delta_t numeric;
+    begin
+        -- расчет ббб (давление)
+        v_delta_p := p_pressure - get_meteo_constant('base_pressure');
+        if v_delta_p >= 0 then
+            v_bbb := lpad(v_delta_p::text, 3, '0');
+        else
+            v_bbb := (get_meteo_constant('negative_pressure_code') - v_delta_p)::text;
+        end if;
+
+        -- расчет тт (температура)
+        v_virtual_correction := calc_interpolated(p_temp, get_interpolation(p_temp));
+        v_delta_t := round(p_temp + v_virtual_correction - get_meteo_constant('base_virtual_temperature'));
+        
+        if v_delta_t >= 0 then
+            v_tt := lpad(v_delta_t::text, 2, '0');
+        else
+            v_tt := (get_meteo_constant('negative_temperature_code') - v_delta_t)::text;
+        end if;
+
+        return v_bbb || v_tt;
+    end; $body$;
+
+end $$;
