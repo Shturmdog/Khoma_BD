@@ -11,29 +11,25 @@ WITH bath_parameters AS (
     FROM measurment_input_params
     GROUP BY measurment_bath_id
 ),
-
 validation_results AS (
     SELECT 
         bp.measurment_bath_id,
         mt.short_name as equipment_type,
         bp.height, bp.temperature, bp.pressure,
         bp.wind_direction, bp.wind_speed, bp.bullet_drift,
-        pc.description as error_description
+        fn_validate_meteo(
+            ROW(
+                mt.short_name,
+                bp.height, bp.temperature, bp.pressure,
+                bp.wind_direction, bp.wind_speed, bp.bullet_drift
+            )::meteo_input_parms
+        ) as error_description
     FROM bath_parameters bp
     JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
     JOIN measurment_types mt ON mt.id = mb.measurment_type_id
-    LEFT JOIN LATERAL fn_validate_meteo(
-        ROW(
-            mt.short_name,
-            bp.height, bp.temperature, bp.pressure,
-            bp.wind_direction, bp.wind_speed, bp.bullet_drift
-        )::meteo_input_parms
-    ) AS pc ON true
 )
-
--- Выводим результат
 SELECT
-    measurment_bath_id as "№ (Код пачки)",
+    row_number() over (order by measurment_bath_id) as "№",
     equipment_type as "Тип оборудования",
     height as "Высота метеопоста", 
     temperature as "Температура", 
@@ -41,12 +37,9 @@ SELECT
     wind_direction as "Направление ветра", 
     wind_speed as "Скорость ветра", 
     bullet_drift as "Дальность сноса пуль",
-    CASE WHEN count(error_description) = 0 THEN 'Нет' ELSE 'Да' END as "Флаг: Есть ошибка",
-    COALESCE(string_agg(error_description, '; '), '') as "Описание ошибки"
+    case when error_description is null then 'Нет' else 'Да' end as "Флаг: Есть ошибка",
+    coalesce(error_description, '') as "Описание ошибки"
 FROM validation_results
-GROUP BY
-    measurment_bath_id, equipment_type,
-    height, temperature, pressure, wind_direction, wind_speed, bullet_drift
 ORDER BY measurment_bath_id;
 
 
@@ -64,26 +57,34 @@ WITH bath_parameters AS (
     GROUP BY measurment_bath_id
 ),
 
+
 validation_results AS (
     SELECT 
         mb.employee_id,
-        pc.id as error_id
+        fn_validate_meteo(
+            ROW(
+                mt.short_name,
+                bp.height, bp.temperature, bp.pressure,
+                bp.wind_direction, bp.wind_speed, bp.bullet_drift
+            )::meteo_input_parms
+        ) as error_description
     FROM bath_parameters bp
     JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
     JOIN measurment_types mt ON mt.id = mb.measurment_type_id
-    LEFT JOIN LATERAL fn_validate_meteo(
-        ROW(
-            mt.short_name,
-            bp.height, bp.temperature, bp.pressure,
-            bp.wind_direction, bp.wind_speed, bp.bullet_drift
-        )::meteo_input_parms
-    ) AS pc ON true
 )
+
+
 SELECT
     e.id as "Код сотрудника",
     e.name as "ФИО",
-    count(vr.error_id) as "Допущено ошибок"
+    coalesce(sum(
+        case 
+            when vr.error_description is not null 
+            then length(vr.error_description) - length(replace(vr.error_description, '.', ''))
+            else 0 
+        end
+    ), 0) as "Допущено ошибок"
 FROM employees e
 LEFT JOIN validation_results vr ON vr.employee_id = e.id
 GROUP BY e.id, e.name
-ORDER BY count(vr.error_id) ASC, e.name ASC;
+ORDER BY "Допущено ошибок" ASC, e.name ASC;
