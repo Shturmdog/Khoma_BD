@@ -13,27 +13,28 @@ WITH bath_parameters AS (
 ),
 
 validation_results AS (
-    -- Прогоняем через функцию проверки
     SELECT 
         bp.measurment_bath_id,
-        mb.measurment_type_id,
+        mt.short_name as equipment_type,
         bp.height, bp.temperature, bp.pressure,
         bp.wind_direction, bp.wind_speed, bp.bullet_drift,
         pc.description as error_description
     FROM bath_parameters bp
     JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
-    LEFT JOIN LATERAL parmeters_checking(
+    JOIN measurment_types mt ON mt.id = mb.measurment_type_id
+    LEFT JOIN LATERAL fn_validate_meteo(
         ROW(
-            mb.measurment_type_id,
+            mt.short_name,
             bp.height, bp.temperature, bp.pressure,
             bp.wind_direction, bp.wind_speed, bp.bullet_drift
-        )::parameters_list_type
+        )::meteo_input_parms
     ) AS pc ON true
 )
+
 -- Выводим результат
 SELECT
     measurment_bath_id as "№ (Код пачки)",
-    measurment_type_id as "Тип оборудования",
+    equipment_type as "Тип оборудования",
     height as "Высота метеопоста", 
     temperature as "Температура", 
     pressure as "Давление",
@@ -44,10 +45,9 @@ SELECT
     COALESCE(string_agg(error_description, '; '), '') as "Описание ошибки"
 FROM validation_results
 GROUP BY
-    measurment_bath_id, measurment_type_id,
+    measurment_bath_id, equipment_type,
     height, temperature, pressure, wind_direction, wind_speed, bullet_drift
 ORDER BY measurment_bath_id;
-
 
 
 -- Лучший стрелок
@@ -63,25 +63,27 @@ WITH bath_parameters AS (
     FROM measurment_input_params
     GROUP BY measurment_bath_id
 ),
+
 validation_results AS (
     SELECT 
         mb.employee_id,
-        pc.name as error_name
+        pc.id as error_id
     FROM bath_parameters bp
     JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
-    LEFT JOIN LATERAL parmeters_checking(
+    JOIN measurment_types mt ON mt.id = mb.measurment_type_id
+    LEFT JOIN LATERAL fn_validate_meteo(
         ROW(
-            mb.measurment_type_id,
+            mt.short_name,
             bp.height, bp.temperature, bp.pressure,
             bp.wind_direction, bp.wind_speed, bp.bullet_drift
-        )::parameters_list_type
+        )::meteo_input_parms
     ) AS pc ON true
 )
 SELECT
     e.id as "Код сотрудника",
     e.name as "ФИО",
-    count(vr.error_name) as "Допущено ошибок"
+    count(vr.error_id) as "Допущено ошибок"
 FROM employees e
 LEFT JOIN validation_results vr ON vr.employee_id = e.id
 GROUP BY e.id, e.name
-ORDER BY count(vr.error_name) ASC, e.name ASC;
+ORDER BY count(vr.error_id) ASC, e.name ASC;
