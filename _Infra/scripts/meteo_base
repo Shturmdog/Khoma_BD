@@ -15,49 +15,55 @@ begin
         bullet_drift numeric
     );
 
+	
+
     -- Функция проверки
-    create or replace function fn_validate_meteo(parms meteo_input_parms)
-    returns text
+   begin
+   	drop table if exists errors_catalog cascade;
+    drop sequence if exists errors_catalog_seq cascade;
+    
+    create sequence errors_catalog_seq start with 1;
+    create table errors_catalog (
+        id          integer default nextval('errors_catalog_seq') not null,
+        name        character varying(50) not null,
+        description character varying(255) not null
+    );
+    alter sequence errors_catalog_seq owned by errors_catalog.id;
+    alter table errors_catalog add constraint pk_errors_catalog primary key (id);
+
+    insert into errors_catalog(id, name, description) values
+        (1, 'invalid_equipment', 'Неизвестный тип оборудования (допустимо: ДМК, ВР)'),
+        (2, 'empty_height',      'Высота должна быть целым числом'),
+        (3, 'temp_out_of_range', 'Температура должна быть от -58 до 58'),
+        (4, 'press_out_of_range','Давление должно быть от 500 до 900'),
+        (5, 'wind_dir_invalid',  'Направление ветра должно быть целым числом от 0 до 59'),
+        (6, 'wind_speed_error',  'Скорость ветра должна быть целым числом от 0 до 15'),
+        (7, 'bullet_drift_error','Дальность сноса пуль должна быть целым числом от 0 до 150');
+
+		
+	create or replace function fn_validate_meteo(parms meteo_input_parms)
+    returns setof errors_catalog
     language plpgsql
     as $body$ 
-    declare v_errors text := '';
     begin
-        if parms.height != trunc(parms.height) then
-            v_errors := v_errors || 'Высота должна быть целым числом. ';
-        end if;
-
-        if parms.temperature < -58 or parms.temperature > 58 then 
-            v_errors := v_errors || 'Температура должна быть от -58 до 58. ';
-        end if;
-
-        if parms.pressure < 500 or parms.pressure > 900 then
-            v_errors := v_errors || 'Давление должно быть от 500 до 900. ';
-        end if;
-
-        if parms.wind_dir < 0 or parms.wind_dir > 59 or parms.wind_dir != trunc(parms.wind_dir) then
-            v_errors := v_errors || 'Направление ветра должно быть целым числом от 0 до 59. ';
-        end if;
-
-        if parms.equipment_type = 'ДМК' then
-            if parms.wind_speed < 0 or parms.wind_speed > 15 or parms.wind_speed != trunc(parms.wind_speed) then
-                v_errors := v_errors || 'Скорость ветра должна быть целым числом от 0 до 15. ';
-            end if;
-            
-        elsif parms.equipment_type = 'ВР' then
-            if parms.bullet_drift < 0 or parms.bullet_drift > 150 or parms.bullet_drift != trunc(parms.bullet_drift) then
-                v_errors := v_errors || 'Дальность сноса пуль должна быть целым числом от 0 до 150. ';
-            end if;
-        else 
-            v_errors := v_errors || 'Неизвестный тип оборудования. ';
-        end if;
-
-        if v_errors = '' then
-            return null;
-        end if;
-        
-        return trim(v_errors);
+        return query
+        with error_checks as (
+            select 1 as error_id, (parms.equipment_type is null or parms.equipment_type not in ('ДМК', 'ВР')) as has_error
+            union all select 2, (parms.height is null or parms.height != trunc(parms.height))
+            union all select 3, (parms.temperature is null or parms.temperature < -58 or parms.temperature > 58)
+            union all select 4, (parms.pressure is null or parms.pressure < 500 or parms.pressure > 900)
+            union all select 5, (parms.wind_dir is null or parms.wind_dir < 0 or parms.wind_dir > 59 or parms.wind_dir != trunc(parms.wind_dir))
+            union all select 6, (parms.equipment_type = 'ДМК' and (parms.wind_speed is null or parms.wind_speed < 0 or parms.wind_speed > 15 or parms.wind_speed != trunc(parms.wind_speed)))
+            union all select 7, (parms.equipment_type = 'ВР' and (parms.bullet_drift is null or parms.bullet_drift < 0 or parms.bullet_drift > 150 or parms.bullet_drift != trunc(parms.bullet_drift)))
+        )
+        select ec.id, ec.name, ec.description
+        from error_checks ech
+        join errors_catalog ec on ec.id = ech.error_id
+        where ech.has_error;
     end;
     $body$;
+		
+   end;
 
     -- Таблица констант
     drop table if exists meteo_constants cascade;
