@@ -1,6 +1,6 @@
 -- Список параметров с ошибками
-WITH bath_parameters AS (
-    SELECT
+with bath_parameters as (
+    select
         measurment_bath_id,
         max(case when parameter_type_id = 1 then measurment_value end) as height,
         max(case when parameter_type_id = 2 then measurment_value end) as temperature,
@@ -8,27 +8,27 @@ WITH bath_parameters AS (
         max(case when parameter_type_id = 4 then measurment_value end) as wind_direction,
         max(case when parameter_type_id = 5 then measurment_value end) as wind_speed,
         max(case when parameter_type_id = 6 then measurment_value end) as bullet_drift
-    FROM measurment_input_params
-    GROUP BY measurment_bath_id
+    from measurment_input_params
+    group by measurment_bath_id
 ),
-validation_results AS (
-    SELECT 
+validation_results as (
+    select 
         bp.measurment_bath_id,
         mt.short_name as equipment_type,
         bp.height, bp.temperature, bp.pressure,
         bp.wind_direction, bp.wind_speed, bp.bullet_drift,
         fn_validate_meteo(
-            ROW(
+            row(
                 mt.short_name,
                 bp.height, bp.temperature, bp.pressure,
                 bp.wind_direction, bp.wind_speed, bp.bullet_drift
             )::meteo_input_parms
         ) as error_description
-    FROM bath_parameters bp
-    JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
-    JOIN measurment_types mt ON mt.id = mb.measurment_type_id
+    from bath_parameters bp
+    join measurment_baths mb on mb.id = bp.measurment_bath_id
+    join measurment_types mt on mt.id = mb.measurment_type_id
 )
-SELECT
+select
     row_number() over (order by measurment_bath_id) as "№",
     equipment_type as "Тип оборудования",
     height as "Высота метеопоста", 
@@ -39,13 +39,13 @@ SELECT
     bullet_drift as "Дальность сноса пуль",
     case when error_description is null then 'Нет' else 'Да' end as "Флаг: Есть ошибка",
     coalesce(error_description, '') as "Описание ошибки"
-FROM validation_results
-ORDER BY measurment_bath_id;
+from validation_results
+order by measurment_bath_id;
 
 
 -- Лучший стрелок
-WITH bath_parameters AS (
-    SELECT
+with bath_parameters as (
+    select
         measurment_bath_id,
         max(case when parameter_type_id = 1 then measurment_value end) as height,
         max(case when parameter_type_id = 2 then measurment_value end) as temperature,
@@ -53,28 +53,28 @@ WITH bath_parameters AS (
         max(case when parameter_type_id = 4 then measurment_value end) as wind_direction,
         max(case when parameter_type_id = 5 then measurment_value end) as wind_speed,
         max(case when parameter_type_id = 6 then measurment_value end) as bullet_drift
-    FROM measurment_input_params
-    GROUP BY measurment_bath_id
+    from measurment_input_params
+    group by measurment_bath_id
 ),
 
 
-validation_results AS (
-    SELECT 
+validation_results as (
+    select 
         mb.employee_id,
         fn_validate_meteo(
-            ROW(
+            row(
                 mt.short_name,
                 bp.height, bp.temperature, bp.pressure,
                 bp.wind_direction, bp.wind_speed, bp.bullet_drift
             )::meteo_input_parms
         ) as error_description
-    FROM bath_parameters bp
-    JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
-    JOIN measurment_types mt ON mt.id = mb.measurment_type_id
+    from bath_parameters bp
+    join measurment_baths mb on mb.id = bp.measurment_bath_id
+    join measurment_types mt on mt.id = mb.measurment_type_id
 )
 
 
-SELECT
+select
     e.id as "Код сотрудника",
     e.name as "ФИО",
     coalesce(sum(
@@ -84,7 +84,7 @@ SELECT
             else 0 
         end
     ), 0) as "Допущено ошибок"
-FROM employees e
-LEFT JOIN validation_results vr ON vr.employee_id = e.id
-GROUP BY e.id, e.name
-ORDER BY "Допущено ошибок" ASC, e.name ASC;
+from employees e
+left join validation_results vr on vr.employee_id = e.id
+group by e.id, e.name
+order by "Допущено ошибок" asc, e.name asc;
