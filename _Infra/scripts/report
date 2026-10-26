@@ -1,243 +1,87 @@
-do $$
-begin
+-- Список параметров с ошибками
+WITH bath_parameters AS (
+    SELECT
+        measurment_bath_id,
+        max(case when parameter_type_id = 1 then measurment_value end) as height,
+        max(case when parameter_type_id = 2 then measurment_value end) as temperature,
+        max(case when parameter_type_id = 3 then measurment_value end) as pressure,
+        max(case when parameter_type_id = 4 then measurment_value end) as wind_direction,
+        max(case when parameter_type_id = 5 then measurment_value end) as wind_speed,
+        max(case when parameter_type_id = 6 then measurment_value end) as bullet_drift
+    FROM measurment_input_params
+    GROUP BY measurment_bath_id
+),
 
-    drop table if exists errors_types cascade;
-    drop table if exists errors_catalog cascade;
-    drop type if exists parameters_list_type cascade;
-
-    create sequence errors_catalog_seq start with 1;
-    create sequence errors_types_seq start with 1;
-
-    -- справочник ошибок
-    create table errors_catalog (
-        id          integer default nextval('errors_catalog_seq') not null,
-        name        character varying(50) not null,
-        description character varying(255) not null
-    );
-    alter sequence errors_catalog_seq owned by errors_catalog.id;
-    alter table errors_catalog add constraint pk_errors_catalog primary key (id);
-
-    -- журнал ошибок
-    create table errors_types (
-        id                          integer default nextval('errors_types_seq') not null,
-        measurement_error_id        integer not null,
-        measurement_input_param_id  integer not null
-    );
-    alter sequence errors_types_seq owned by errors_types.id;
-    alter table errors_types add constraint pk_errors_types primary key (id);
-    
-    alter table errors_types add constraint fk_error_type 
-        foreign key (measurement_error_id) references errors_catalog(id);
-    alter table errors_types add constraint fk_error_input_param 
-        foreign key (measurement_input_param_id) references measurment_input_params(id);
-
-    insert into errors_catalog(id, name, description) values
-        (1, 'invalid_equipment', 'допустимые типы оборудования: 1 (дмк) или 2 (вр)'),
-        (2, 'empty_height',      'поле высоты метеопоста не может быть пустым'),
-        (3, 'temp_out_of_range', 'температура должна быть в пределах от -58 до 58 °c'),
-        (4, 'press_out_of_range','давление должно быть в диапазоне от 500 до 900 мм рт. ст.'),
-        (5, 'wind_dir_invalid',  'направление ветра должно быть от 00 до 59 делений'),
-        (6, 'wind_speed_error',  'для дмк скорость ветра должна быть от 0 до 15 м/с'),
-        (7, 'bullet_drift_error','для вр дальность сноса пуль должна быть от 0 до 150 м');
-    
-    perform setval('errors_catalog_seq', (select max(id) from errors_catalog));
-
-    -- тип данных
-    create type parameters_list_type as (
-        equipment_id    integer,
-        height          integer,
-        temperature     numeric,
-        pressure        integer,
-        wind_direction  integer,
-        wind_speed      integer,
-        bullet_drift    integer
-    );
-
-    -- функция проверки
-    create or replace function parmeters_checking(params parameters_list_type)
-        returns setof errors_catalog 
-        language plpgsql as $body$
-    begin
-        return query
-        with error_checks as (
-            select 1 as error_type_id, (params.equipment_id is null or params.equipment_id not in (1, 2)) as has_error
-            union all select 2, params.height is null
-            union all select 3, (params.temperature is null or params.temperature < -58 or params.temperature > 58)
-            union all select 4, (params.pressure is null or params.pressure < 500 or params.pressure > 900)
-            union all select 5, (params.wind_direction is null or params.wind_direction < 0 or params.wind_direction > 59)
-            union all select 6, (params.equipment_id = 1 and (params.wind_speed is null or params.wind_speed < 0 or params.wind_speed > 15))
-            union all select 7, (params.equipment_id = 2 and (params.bullet_drift is null or params.bullet_drift < 0 or params.bullet_drift > 150))
-        )
-        select et.id, et.name, et.description
-        from error_checks ec
-        join errors_catalog et on et.id = ec.error_type_id
-        where ec.has_error;
-    end; $body$;
-
-
-    -- константы для метео
-    drop table if exists meteo_calc_constants cascade;
-    create sequence meteo_calc_constants_seq start with 1;
-    create table meteo_calc_constants (
-        id              integer default nextval('meteo_calc_constants_seq') not null,
-        name            character varying(50) unique not null,
-        constant_value  numeric not null,
-        description     character varying(255) not null
-    );
-    alter sequence meteo_calc_constants_seq owned by meteo_calc_constants.id;
-    alter table meteo_calc_constants add constraint pk_meteo_calc_constants primary key (id);
-
-    insert into meteo_calc_constants (name, constant_value, description) values
-        ('base_pressure', 750, 'базовое атмосферное давление'),
-        ('base_virtual_temperature', 15.9, 'базовая виртуальная температура'),
-        ('negative_pressure_code', 500, 'код для отрицательного давления'),
-        ('negative_temperature_code', 50, 'код для отрицательной температуры');
-    perform setval('meteo_calc_constants_seq', (select max(id) from meteo_calc_constants));
-
-
-    -- функции форматирования
-    create or replace function get_meteo_constant(p_name varchar)
-    returns numeric language plpgsql as $body$
-    declare v_val numeric;
-    begin
-        select constant_value into v_val from meteo_calc_constants where name = p_name;
-        if v_val is null then raise exception 'константа "%" не найдена', p_name; end if;
-        return v_val;
-    end; $body$;
-
-    create or replace function format_meteo_datetime(p_date timestamp) returns text language plpgsql as $body$
-    begin
-        return to_char(p_date, 'ddhh24') || floor((extract(minute from p_date) / 10))::text;
-    end; $body$;
-
-    create or replace function format_meteo_height(p_height integer) returns text language plpgsql as $body$
-    begin
-        return lpad(p_height::text, 4, '0');
-    end; $body$;
-
-    create or replace function format_meteo_pressure(p_pressure integer) returns text language plpgsql as $body$
-    declare
-        v_temp integer;
-        v_pressure text;
-    begin
-        v_temp := p_pressure - get_meteo_constant('base_pressure')::integer;
-        if v_temp >= 0 then
-            v_pressure := lpad(v_temp::text, 3, '0');
-        else
-            v_pressure := (get_meteo_constant('negative_pressure_code') - v_temp)::text;
-        end if;
-        return v_pressure;
-    end; $body$;
-
-    create or replace function format_meteo_temperature(p_temperature numeric) returns text language plpgsql as $body$
-    declare
-        v_virtual_correction numeric;
-        v_temp integer;
-        v_temperature text;
-    begin
-        v_virtual_correction := calc_interpolated(p_temperature, get_interpolation(p_temperature));
-        v_temp := round(p_temperature + v_virtual_correction - get_meteo_constant('base_virtual_temperature'))::integer;
-        
-        if v_temp >= 0 then
-            v_temperature := lpad(v_temp::text, 2, '0');
-        else
-            v_temperature := (get_meteo_constant('negative_temperature_code') - v_temp)::text;
-        end if;
-        return v_temperature;
-    end; $body$;
-
-    create or replace function format_meteo_pressure_temperature(p_pressure integer, p_temperature numeric) returns text language plpgsql as $body$
-    begin
-        return format_meteo_pressure(p_pressure) || format_meteo_temperature(p_temperature);
-    end; $body$;
-
-end $$;
-
--- список параметров с ошибками
-with 
-    bath_parameters as ( -- <- ПЕРЕИМЕНОВАНО ЗДЕСЬ
-        select
-            measurment_bath_id,
-            max(case when parameter_type_id = 1 then measurment_value end) as height,
-            max(case when parameter_type_id = 2 then measurment_value end) as temperature,
-            max(case when parameter_type_id = 3 then measurment_value end) as pressure,
-            max(case when parameter_type_id = 4 then measurment_value end) as wind_direction,
-            max(case when parameter_type_id = 5 then measurment_value end) as wind_speed,
-            max(case when parameter_type_id = 6 then measurment_value end) as bullet_drift
-        from measurment_input_params
-        group by measurment_bath_id
-    ),
-    validation_results as (
-        select 
-            bp.measurment_bath_id,
+validation_results AS (
+    -- Прогоняем через функцию проверки
+    SELECT 
+        bp.measurment_bath_id,
+        mb.measurment_type_id,
+        bp.height, bp.temperature, bp.pressure,
+        bp.wind_direction, bp.wind_speed, bp.bullet_drift,
+        pc.description as error_description
+    FROM bath_parameters bp
+    JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
+    LEFT JOIN LATERAL parmeters_checking(
+        ROW(
             mb.measurment_type_id,
             bp.height, bp.temperature, bp.pressure,
-            bp.wind_direction, bp.wind_speed, bp.bullet_drift,
-            pc.name as error_name,
-            pc.description as error_description
-        from bath_parameters as bp -- <- ИСПОЛЬЗУЕТСЯ НОВОЕ ИМЯ
-        join measurment_baths as mb on mb.id = bp.measurment_bath_id
-        left join lateral parmeters_checking(
-            row(
-                mb.measurment_type_id,
-                bp.height, bp.temperature, bp.pressure,
-                bp.wind_direction, bp.wind_speed, bp.bullet_drift
-            )::parameters_list_type
-        ) as pc on true
-    )
-select
-    measurment_bath_id as "код пачки",
-    measurment_type_id as "тип оборудования",
-    height as "высота", 
-    temperature as "температура", 
-    pressure as "давление",
-    wind_direction as "направление", 
-    wind_speed as "скорость", 
-    bullet_drift as "снос пуль",
-    case when count(error_name) = 0 then 'нет ошибки' else 'есть ошибка' end as "флаг: есть ошибка",
-    coalesce(string_agg(error_description, '; '), '') as "описание ошибки"
-from validation_results
-group by
+            bp.wind_direction, bp.wind_speed, bp.bullet_drift
+        )::parameters_list_type
+    ) AS pc ON true
+)
+-- Выводим результат
+SELECT
+    measurment_bath_id as "№ (Код пачки)",
+    measurment_type_id as "Тип оборудования",
+    height as "Высота метеопоста", 
+    temperature as "Температура", 
+    pressure as "Давление",
+    wind_direction as "Направление ветра", 
+    wind_speed as "Скорость ветра", 
+    bullet_drift as "Дальность сноса пуль",
+    CASE WHEN count(error_description) = 0 THEN 'Нет' ELSE 'Да' END as "Флаг: Есть ошибка",
+    COALESCE(string_agg(error_description, '; '), '') as "Описание ошибки"
+FROM validation_results
+GROUP BY
     measurment_bath_id, measurment_type_id,
     height, temperature, pressure, wind_direction, wind_speed, bullet_drift
-order by measurment_bath_id;
+ORDER BY measurment_bath_id;
 
 
--- лучший стрелок 
-with 
-    bath_parameters as ( -- <- ПЕРЕИМЕНОВАНО ЗДЕСЬ
-        select
-            measurment_bath_id,
-            max(case when parameter_type_id = 1 then measurment_value end) as height,
-            max(case when parameter_type_id = 2 then measurment_value end) as temperature,
-            max(case when parameter_type_id = 3 then measurment_value end) as pressure,
-            max(case when parameter_type_id = 4 then measurment_value end) as wind_direction,
-            max(case when parameter_type_id = 5 then measurment_value end) as wind_speed,
-            max(case when parameter_type_id = 6 then measurment_value end) as bullet_drift
-        from measurment_input_params
-        group by measurment_bath_id
-    ),
-    validation_results as (
-        select 
-            bp.measurment_bath_id,
+
+-- Лучший стрелок
+WITH bath_parameters AS (
+    SELECT
+        measurment_bath_id,
+        max(case when parameter_type_id = 1 then measurment_value end) as height,
+        max(case when parameter_type_id = 2 then measurment_value end) as temperature,
+        max(case when parameter_type_id = 3 then measurment_value end) as pressure,
+        max(case when parameter_type_id = 4 then measurment_value end) as wind_direction,
+        max(case when parameter_type_id = 5 then measurment_value end) as wind_speed,
+        max(case when parameter_type_id = 6 then measurment_value end) as bullet_drift
+    FROM measurment_input_params
+    GROUP BY measurment_bath_id
+),
+validation_results AS (
+    SELECT 
+        mb.employee_id,
+        pc.name as error_name
+    FROM bath_parameters bp
+    JOIN measurment_baths mb ON mb.id = bp.measurment_bath_id
+    LEFT JOIN LATERAL parmeters_checking(
+        ROW(
             mb.measurment_type_id,
-            pc.name as error_name
-        from bath_parameters as bp -- <- ИСПОЛЬЗУЕТСЯ НОВОЕ ИМЯ
-        join measurment_baths as mb on mb.id = bp.measurment_bath_id
-        left join lateral parmeters_checking(
-            row(
-                mb.measurment_type_id,
-                bp.height, bp.temperature, bp.pressure,
-                bp.wind_direction, bp.wind_speed, bp.bullet_drift
-            )::parameters_list_type
-        ) as pc on true
-    )
-select
-    e.id as "код сотрудника",
-    e.name as "фио",
-    count(vr.error_name) as "допущено ошибок"
-from employees as e
-left join measurment_baths as mb on mb.employee_id = e.id
-left join validation_results as vr on vr.measurment_bath_id = mb.id
-group by e.id, e.name
-order by count(vr.error_name) asc, e.name asc;
+            bp.height, bp.temperature, bp.pressure,
+            bp.wind_direction, bp.wind_speed, bp.bullet_drift
+        )::parameters_list_type
+    ) AS pc ON true
+)
+SELECT
+    e.id as "Код сотрудника",
+    e.name as "ФИО",
+    count(vr.error_name) as "Допущено ошибок"
+FROM employees e
+LEFT JOIN validation_results vr ON vr.employee_id = e.id
+GROUP BY e.id, e.name
+ORDER BY count(vr.error_name) ASC, e.name ASC;
