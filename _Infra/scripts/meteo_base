@@ -1,0 +1,164 @@
+do $$
+begin
+    alter table measurment_input_params 
+    add column if not exists error_message text;
+
+    -- Список параметров
+    drop type if exists meteo_input_parms cascade;
+    create type meteo_input_parms as (
+        equipment_type text,  
+        height numeric,       
+        temperature numeric,
+        pressure numeric,
+        wind_dir numeric,
+        wind_speed numeric,
+        bullet_drift numeric
+    );
+
+	
+
+    -- Функция проверки
+   begin
+   	create or replace function fn_validate_meteo(parms meteo_input_parms)
+    returns text
+    language plpgsql
+    as $body$ 
+    declare v_errors text := '';
+    begin
+        if parms.height is null or parms.height != trunc(parms.height) then
+            v_errors := v_errors || 'Высота должна быть целым числом. ';
+        end if;
+
+        if parms.temperature is null or parms.temperature < -58 or parms.temperature > 58 then 
+            v_errors := v_errors || 'Температура должна быть от -58 до 58. ';
+        end if;
+
+        if parms.pressure is null or parms.pressure < 500 or parms.pressure > 900 then
+            v_errors := v_errors || 'Давление должно быть от 500 до 900. ';
+        end if;
+
+        if parms.wind_dir is null or parms.wind_dir < 0 or parms.wind_dir > 59 or parms.wind_dir != trunc(parms.wind_dir) then
+            v_errors := v_errors || 'Направление ветра должно быть от 0 до 59. ';
+        end if;
+
+        if parms.equipment_type = 'ДМК' then
+            if parms.wind_speed is null or parms.wind_speed < 0 or parms.wind_speed > 15 or parms.wind_speed != trunc(parms.wind_speed) then
+                v_errors := v_errors || 'Скорость ветра должна быть от 0 до 15. ';
+            end if;
+        elsif parms.equipment_type = 'ВР' then
+            if parms.bullet_drift is null or parms.bullet_drift < 0 or parms.bullet_drift > 150 or parms.bullet_drift != trunc(parms.bullet_drift) then
+                v_errors := v_errors || 'Дальность сноса пуль должна быть от 0 до 150. ';
+            end if;
+        else 
+            v_errors := v_errors || 'Неизвестный тип оборудования. ';
+        end if;
+
+        if v_errors = '' then
+            return null;
+        end if;
+        
+        return trim(v_errors);
+    end;
+    $body$;
+   end;
+
+    -- Таблица констант
+    drop table if exists meteo_constants cascade;
+    drop sequence if exists meteo_constants_seq cascade;
+    
+    create sequence meteo_constants_seq start with 1;
+
+    create table meteo_constants (
+        id integer default nextval('meteo_constants_seq') not null,
+        name character varying(50) unique not null,
+        const_value numeric not null,
+        description text,
+        constraint pk_meteo_constants primary key (id)
+    );
+
+    alter sequence meteo_constants_seq owned by meteo_constants.id;
+
+    -- Вспомогательная функция для чтения констант
+    create or replace function get_meteo_constant(p_name text)
+    returns numeric
+    language plpgsql
+    as $body$
+    declare
+        v_val numeric;
+    begin
+        select const_value into v_val 
+        from meteo_constants 
+        where name = p_name;
+        
+        if v_val is null then
+            raise exception 'Константа "%" не найдена в таблице meteo_constants', p_name;
+        end if;
+        
+        return v_val;
+    end;
+    $body$;
+
+    -- Заполнение таблицы констант
+    insert into meteo_constants(name, const_value, description) values
+    ('base_pressure', 750, 'Табличное значение наземного давления'),
+    ('base_virtual_temperature', 15.9, 'Табличное значение приземной температуры'),
+    ('negative_pressure', 500, 'Код для отрицательного отклонения давления'),
+    ('negative_temperature', 50, 'Код для отрицательного отклонения температуры')
+    on conflict (name) do nothing; 
+
+    -- Функция БББТТ
+    create or replace function fn_meteo_bbbt(p_pressure numeric, p_temp numeric)
+    returns text language plpgsql as $body$
+    declare
+        v_bbb text;
+        v_tt text;
+        v_delta_p numeric;
+        v_virtual_correction numeric;
+        v_delta_t numeric;
+    begin
+        -- расчет ббб (давление)
+        v_delta_p := p_pressure - get_meteo_constant('base_pressure');
+        if v_delta_p >= 0 then
+            v_bbb := lpad(v_delta_p::text, 3, '0');
+        else
+            v_bbb := (get_meteo_constant('negative_pressure') - v_delta_p)::text;
+        end if;
+
+        -- расчет тт (температура)
+        v_virtual_correction := calc_interpolated(p_temp, get_interpolation(p_temp));
+        v_delta_t := round(p_temp + v_virtual_correction - get_meteo_constant('base_virtual_temperature'));
+        
+        if v_delta_t >= 0 then
+            v_tt := lpad(v_delta_t::text, 2, '0');
+        else
+            v_tt := (get_meteo_constant('negative_temperature') - v_delta_t)::text;
+        end if;
+
+        return v_bbb || v_tt;
+    end; $body$;
+
+    -- ВВВВ
+    create or replace function fn_meteo_vvvv(p_height numeric) returns text language sql as $body$
+        select case 
+            when p_height < 0 then '-' || lpad(abs(round(p_height))::text, 3, '0')
+            else lpad(round(p_height)::text, 4, '0')
+        end;
+    $body$;
+
+    -- ДДЧЧМ
+    create or replace function fn_meteo_ddchchm(p_time timestamp) returns text language sql as $body$
+        select to_char(p_time, 'ddhh24') || floor(extract(minute from p_time) / 10)::text;
+    $body$;
+
+    -- Полный заголовок
+    create or replace function fn_meteo_header(
+        p_time timestamp,
+        p_height numeric,
+        p_pressure numeric,
+        p_temp numeric
+    )
+    returns text language sql as $body$
+        select fn_meteo_ddchchm(p_time) || ' ' || fn_meteo_vvvv(p_height) || ' ' || fn_meteo_bbbt(p_pressure, p_temp);
+    $body$;
+    
+end $$;
