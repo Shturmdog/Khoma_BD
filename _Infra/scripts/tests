@@ -1,0 +1,46 @@
+-- Тесты
+SELECT 
+    'Тест 1 (ДМК, +23°)' AS "Сценарий",
+    height AS "Высота", 
+    temp_deviation AS "Откл. темп. (ТТ)", 
+    wind_direction AS "Ветер (Напр)", 
+    wind_speed AS "Ветер (Скор)"
+FROM fn_get_meteo_data(
+    ROW('ДМК', 100, 23.0, 750, 15, 6, 0)::meteo_input_parms, 
+    1
+);
+
+
+SELECT 
+    'Тест 2 (ДМК, +3°)' AS "Сценарий",
+    height AS "Высота", 
+    temp_deviation AS "Откл. темп. (ТТ)", 
+    wind_direction AS "Ветер (Напр)", 
+    wind_speed AS "Ветер (Скор)"
+FROM fn_get_meteo_data(
+    ROW('ДМК', 100, 3.0, 750, 15, 3, 0)::meteo_input_parms, 
+    1
+);
+
+
+SELECT 
+    'Тест 3 (ВР, +3°)' AS "Сценарий",
+    height AS "Высота", 
+    temp_deviation AS "Откл. темп. (ТТ)", 
+    wind_direction AS "Ветер (Напр)", 
+    wind_speed AS "Ветер (Скор)"
+FROM fn_get_meteo_data(
+    ROW('ВР', 100, 3.0, 750, 15, 0, 80)::meteo_input_parms, 
+    2
+);
+
+SELECT 
+    'Тест 4 (ДМК, +40°)' AS "Сценарий",
+    height AS "Высота", 
+    temp_deviation AS "Откл. темп. (ТТ)", 
+    wind_direction AS "Ветер (Напр)", 
+    wind_speed AS "Ветер (Скор)"
+FROM fn_get_meteo_data(
+    ROW('ДМК', 100, 40.0, 750, 0, 10, 0)::meteo_input_parms, 
+    1
+);
